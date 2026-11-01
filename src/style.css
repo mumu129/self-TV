@@ -1,0 +1,21 @@
+/* src/style.css */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #242424;
+  color: rgba(255, 255, 255, 0.87);
+  min-height: 100vh;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+button {
+  cursor: pointer;
+}
