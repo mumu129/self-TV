@@ -47,7 +47,7 @@ async function fetchText(url) {
     request.end();
   });
 }
-async function downloadFile(url, dest, taskId) {
+async function downloadSingleFile(url, dest, taskId) {
   return new Promise((resolve, reject) => {
     let isSettled = false;
     const request = net.request({ url });
@@ -80,6 +80,24 @@ async function downloadFile(url, dest, taskId) {
     });
     request.end();
   });
+}
+async function downloadFileWithRetry(url, dest, taskId, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      if (activeDownloads[taskId]) throw new Error("CANCELED");
+      await downloadSingleFile(url, dest, taskId);
+      return;
+    } catch (err) {
+      if (err.message === "CANCELED" || activeDownloads[taskId]) {
+        throw new Error("CANCELED");
+      }
+      if (attempt === retries) {
+        throw new Error(`FAILED_AFTER_${retries}_RETRIES`);
+      }
+      console.warn(`分片下载失败 (尝试 ${attempt}/${retries})，1秒后重试...`);
+      await new Promise((r) => setTimeout(r, 1e3));
+    }
+  }
 }
 function resolveUrl(baseUrl, relativeUrl) {
   try {
@@ -232,11 +250,11 @@ ipcMain.handle("download-episode", async (event, { url, filename, taskId }) => {
       const dest = path.join(saveDir, path.basename(new URL(tsUrl).pathname) || `part${i}.ts`);
       if (!fs.existsSync(dest)) {
         try {
-          await downloadFile(tsUrl, dest, taskId);
+          await downloadFileWithRetry(tsUrl, dest, taskId);
         } catch (err) {
-          if (activeDownloads[taskId]) return { ok: false, error: "CANCELED" };
-          if (err.message === "TIMEOUT") {
-            console.warn(`分片 ${tsUrl} 下载超时，跳过...`);
+          if (err.message === "CANCELED" || activeDownloads[taskId]) return { ok: false, error: "CANCELED" };
+          if (err.message.includes("FAILED_AFTER_")) {
+            console.warn(`分片 ${tsUrl} 重试3次均失败，放弃此分片...`);
             continue;
           }
         }

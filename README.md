@@ -1,18 +1,63 @@
-# Vue 3 + TypeScript + Vite
+# TVBox Player (Electron 桌面端影视播放器)
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+## 📌 项目简介
+基于 `Electron + Vue3 + TypeScript + Vite + Pinia + Element Plus` 开发的桌面端影视应用，完美对标 TVBox（苹果 CMS 规范），支持多源管理、智能去广告、精准断点续播、多任务批量下载等核心功能。
 
-## Recommended IDE Setup
+---
 
-- [VS Code](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur) + [TypeScript Vue Plugin (Volar)](https://marketplace.visualstudio.com/items?itemName=Vue.vscode-typescript-vue-plugin).
+## 🎨 用户的 UI/UX 核心偏好（极度重要，不可违背）
+1. **亮色风格**：不要暗黑模式！整体界面必须是干净清爽的亮色/白色风格（参考厂长资源）。
+2. **窗口控制**：隐藏 Electron 原生标题栏（`frame: false`），左上角仅保留纯文本 `TV`，右上角必须有最小化、最大化、关闭三个按钮（图标必须用 SVG，不能用文本字符）。
+3. **侧边栏布局**：左侧固定一个宽度为 `64px` 的折叠侧边栏（放置首页、历史、收藏、下载、设置）。
+4. **分类显示原则（绝对不要自作主张）**：
+   - 接口返回什么就显示什么，**绝对不能凭空捏造“全部”这个虚拟节点**。
+   - 如果接口数据有严格的父子关系（`type_pid`），就展示一级/二级分类；如果全是平铺数据（没有 pid），就直接平铺展示。
+   - 如果一级分类下没有二级分类，**隐藏二级菜单栏**，不要留空白。
+5. **滑动隐藏**：首页向下滚动时，顶部分类栏和搜索栏需要自动向上收起隐藏；向上滑动时恢复显示。
 
-## Type Support For `.vue` Imports in TS
+---
 
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [TypeScript Vue Plugin (Volar)](https://marketplace.visualstudio.com/items?itemName=Vue.vscode-typescript-vue-plugin) to make the TypeScript language service aware of `.vue` types.
+## ⚙️ 核心业务逻辑与架构
 
-If the standalone TypeScript plugin doesn't feel fast enough to you, Volar has also implemented a [Take Over Mode](https://github.com/johnsoncodehk/volar/discussions/471#discussioncomment-1361669) that is more performant. You can enable it by the following steps:
+### 1. 接口解析规范 (MacCMS)
+- **列表**：`?ac=list` （获取分类 `class`）
+- **详情/列表**：`?ac=detail&t=分类ID&pg=页码` （获取视频列表及筛选 `filters`）
+- **详情**：`?ac=detail&ids=视频ID` （获取播放线路 `vod_play_url`）
+- **容错**：兼容 JSON 和 XML 返回。非标准 m3u8 或需要解析的网页链接，通过 Settings 里的 `parses` 解析接口进行转换。
 
-1. Disable the built-in TypeScript Extension
-   1. Run `Extensions: Show Built-in Extensions` from VSCode's command palette
-   2. Find `TypeScript and JavaScript Language Features`, right click and select `Disable (Workspace)`
-2. Reload the VSCode window by running `Developer: Reload Window` from the command palette.
+### 2. 精准断点续播机制 (核心痛点修复)
+- **不再依赖历史记录对象**，而是在 Store 中使用 `playProgressMap: Record<string, number>` 字典。
+- **键名**：`${video.id}_${episode.url}`，保证**每一集**的进度完全独立，绝不串台。
+- **保存时机**：播放器 `timeupdate` 每 5 秒节流保存；拖动进度条 (`seeked`) 立即保存；切换剧集时强制保存上一集；切到后台或组件销毁时保存最终进度。
+- **恢复时机**：从详情页或历史记录点击剧集时，先查 `getEpisodeProgress()` 传入播放器，播放器加载元数据后强制跳转 `currentTime`。
+
+### 3. M3U8 去广告（帧率指纹算法）
+- **原理**：解析 m3u8 清单，如果包含 `#EXT-X-DISCONTINUITY`，则统计所有分片的时长，匹配最可能的帧率（24/25/30/60），计算 `帧数 = 时长 * 帧率`。如果帧数偏差大于 `0.1`，则判定为广告切片并剔除。
+- **播放端**：通过 `cleanM3u8Ads` 拦截清洗后转换为 `Blob URL` 丢给 `hls.js`。
+- **下载端**：主进程 `main.ts` 下载前清洗掉广告切片，然后再下载。
+
+### 4. 多任务下载与重试机制
+- **架构**：渲染进程将任务丢给主进程，主进程通过 `taskId` 追踪每个任务。
+- **超时重试**：单个 TS 分片下载如果超过 15 秒卡死，会自动重试（最多 3 次），3 次失败才会跳过，防止整个队列卡死。
+- **中断控制**：主进程维护 `activeRequests`，支持随时取消下载。
+- **进度条**：主进程下载完一个分片就通过 `IPC` 发送进度，UI 层有专属的“正在下载”列表，带真实进度条。
+
+---
+
+## 📁 关键文件说明
+- `electron/main.ts`：主进程。负责网络请求代理（绕跨域）、IPC 通信、无边框窗口控制、M3U8 去广告下载与重试。
+- `electron/preload.ts`：预加载脚本。暴露 `window.electronAPI`（网络请求、下载、窗口控制）。
+- `src/types/electron-api.d.ts`：**必须与 preload.ts 同步**，否则 TS 报错。
+- `src/stores/tvbox.ts`：状态管理。管理源列表、分类解析、播放进度字典、历史、收藏、下载队列。
+- `src/utils/adCleaner.ts`：去广告核心算法。
+- `src/views/SiteBrowser.vue`：主界面。侧边栏+顶部栏+分类+海报墙+历史/收藏/下载列表。
+- `src/views/VideoDetail.vue`：详情页。大图+简介+剧集列表。
+- `src/views/VideoPlayer.vue`：播放页。左侧视频，右侧折叠选集面板，集成收藏、下载、解析、去广告。
+
+---
+
+## ⚠️ 开发注意事项 & 踩坑记录
+1. **主进程修改后必须重启**：只要改动了 `electron/main.ts` 或 `preload.ts`，Vite 热更新无效，必须 `Ctrl+C` 重启 `npm run dev`。
+2. **Element Plus 警告**：`el-radio` 的 `label` 属性已废弃，必须用 `:value` 代替。
+3. **SVG 窗口控制**：为了确保图标居中不变形，窗口的最小化、最大化、关闭使用了内联 SVG。
+4. **多源配置**：不写死在代码里，通过设置中心的输入框导入 JSON 或单行 URL。

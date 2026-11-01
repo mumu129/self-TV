@@ -1,6 +1,6 @@
 <template>
   <div class="app-container">
-    <!-- 顶部标题栏 (替换为 SVG 图标) -->
+    <!-- 顶部标题栏 -->
     <div class="title-bar">
       <div class="logo">TV</div>
       <div class="drag-region"></div>
@@ -52,7 +52,8 @@
             </div>
           </div>
 
-          <div class="sub-bar" v-if="currentView === 'home' && currentGroup && !store.searchKeyword">
+          <!-- 核心修改：只有存在 children 时，才显示二级分类栏 -->
+          <div class="sub-bar" v-if="currentView === 'home' && currentGroup && currentGroup.children.length > 0 && !store.searchKeyword">
             <div v-for="c in currentGroup.children" :key="c.id" class="sub-item" :class="{ active: store.currentCategoryId === c.id }" @click="store.handleCategoryChange(c.id)">{{ c.name }}</div>
           </div>
         </div>
@@ -117,7 +118,6 @@
 
           <!-- 我的下载 -->
           <template v-if="currentView === 'download'">
-            <!-- 正在下载列表 -->
             <div v-if="store.downloadingTasks.length > 0" class="download-section">
               <h3 class="section-title">正在下载</h3>
               <div class="list-container">
@@ -141,7 +141,6 @@
               </div>
             </div>
 
-            <!-- 已完成列表 -->
             <div class="download-section" style="margin-top: 30px;">
               <h3 class="section-title" v-if="store.downloads.length > 0">已完成</h3>
               <el-empty v-if="store.downloads.length === 0 && store.downloadingTasks.length === 0" description="暂无下载内容" />
@@ -167,12 +166,7 @@
     </el-container>
 
     <SettingsDrawer v-model="settingsVisible" />
-    
-    <DownloadSelectDialog 
-      v-model="downloadDialogVisible" 
-      :episodes="downloadEps" 
-      @confirm="handleStartDownload" 
-    />
+    <DownloadSelectDialog v-model="downloadDialogVisible" :episodes="downloadEps" @confirm="handleStartDownload" />
   </div>
 </template>
 
@@ -328,7 +322,6 @@ function handleStartDownload(selected: Episode[]) {
 .title-bar .logo { font-size: 16px; font-weight: 900; color: #ff6b00; letter-spacing: 1px; }
 .drag-region { flex: 1; height: 100%; }
 .window-controls { display: flex; -webkit-app-region: no-drag; }
-/* 优化按钮样式，确保 SVG 居中 */
 .ctrl-btn { width: 46px; height: 36px; border: none; background: transparent; color: #555; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
 .ctrl-btn:hover { background-color: #e4e7ed; }
 .ctrl-btn.close:hover { background-color: #e81123; color: white; }

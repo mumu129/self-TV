@@ -26,11 +26,12 @@ function createWindow() {
 
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-    mainWindow.webContents.openDevTools({ mode: 'detach' })
+    // 👇 删除了自动打开 DevTools 的代码
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
+  // 保留了按 F12 手动开关开发者工具的功能
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F12' && input.type === 'keyDown') {
       mainWindow?.webContents.toggleDevTools()
@@ -52,12 +53,14 @@ async function fetchText(url: string): Promise<string> {
   })
 }
 
-async function downloadFile(url: string, dest: string, taskId: string): Promise<void> {
+// 单次带超时的下载
+async function downloadSingleFile(url: string, dest: string, taskId: string): Promise<void> {
   return new Promise((resolve, reject) => {
     let isSettled = false
     const request = net.request({ url })
     activeRequests[taskId] = request
 
+    // 15秒超时
     const timeout = setTimeout(() => {
       if (isSettled) return
       isSettled = true
@@ -87,6 +90,26 @@ async function downloadFile(url: string, dest: string, taskId: string): Promise<
   })
 }
 
+// 包装重试逻辑：最多重试 3 次
+async function downloadFileWithRetry(url: string, dest: string, taskId: string, retries = 3): Promise<void> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      if (activeDownloads[taskId]) throw new Error('CANCELED')
+      await downloadSingleFile(url, dest, taskId)
+      return // 成功则直接返回
+    } catch (err: any) {
+      if (err.message === 'CANCELED' || activeDownloads[taskId]) {
+        throw new Error('CANCELED')
+      }
+      if (attempt === retries) {
+        throw new Error(`FAILED_AFTER_${retries}_RETRIES`)
+      }
+      console.warn(`分片下载失败 (尝试 ${attempt}/${retries})，1秒后重试...`)
+      await new Promise(r => setTimeout(r, 1000)) // 延迟 1 秒再试
+    }
+  }
+}
+
 function resolveUrl(baseUrl: string, relativeUrl: string): string {
   try { return new URL(relativeUrl, baseUrl).href } catch { return relativeUrl }
 }
@@ -114,7 +137,6 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// 👇 核心补全：窗口控制 IPC 监听 👇
 ipcMain.on('window-min', () => mainWindow?.minimize())
 ipcMain.on('window-max', () => {
   if (mainWindow?.isMaximized()) mainWindow.unmaximize()
@@ -227,12 +249,13 @@ ipcMain.handle('download-episode', async (event, { url, filename, taskId }) => {
       
       if (!fs.existsSync(dest)) {
         try {
-          await downloadFile(tsUrl, dest, taskId)
+          // 使用带重试的下载
+          await downloadFileWithRetry(tsUrl, dest, taskId)
         } catch (err: any) {
-          if (activeDownloads[taskId]) return { ok: false, error: 'CANCELED' }
-          if (err.message === 'TIMEOUT') {
-             console.warn(`分片 ${tsUrl} 下载超时，跳过...`)
-             continue 
+          if (err.message === 'CANCELED' || activeDownloads[taskId]) return { ok: false, error: 'CANCELED' }
+          if (err.message.includes('FAILED_AFTER_')) {
+             console.warn(`分片 ${tsUrl} 重试3次均失败，放弃此分片...`)
+             continue // 重试完依然失败，才跳过
           }
         }
       }

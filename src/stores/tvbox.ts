@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { XMLParser } from 'fast-xml-parser'
 import type { Category, CategoryGroup, Episode, TvboxConfig, TvboxSite, VideoItem, ParseItem, FilterGroup, HistoryItem, FavoriteItem, DownloadItem } from '@/types/tvbox'
-import { ElMessage, ElNotification } from 'element-plus'
+import { ElMessage } from 'element-plus'
 
 interface Task {
   id: string
@@ -40,8 +40,6 @@ interface State {
   currentParseUrl: string
   enableAdFilter: boolean
   playProgressMap: Record<string, number>
-  
-  // 新增：正在下载的任务列表
   downloadingTasks: Task[]
 }
 
@@ -144,7 +142,6 @@ export const useTvboxStore = defineStore('tvbox', {
   }),
 
   actions: {
-    // [保持你原本的 saveSites, importConfig, removeSite, selectSite, loadCategories, handleGroupChange, handleCategoryChange, loadVideos, setFilter, search, openVideo, setPlayEpisode, getEpisodeProgress, toggleFavorite, isFavorite, removeFavorite, clearFavorites 不变]
     saveSites() { localStorage.setItem('tvbox_sites', JSON.stringify(this.savedSites || [])) },
     async importConfig(rawText: string): Promise<TvboxSite[]> {
       this.error = ''
@@ -222,24 +219,30 @@ export const useTvboxStore = defineStore('tvbox', {
         const json = await requestJson(url)
         let rawClasses = json.class ?? json.classes ?? []
         if (!Array.isArray(rawClasses) && typeof rawClasses === 'object') rawClasses = [rawClasses]
+        
         const parsedCats: Category[] = rawClasses.map((c: any) => ({
           id: String(c.type_id ?? c.id ?? c['@_id'] ?? ''),
           name: String(c.type_name ?? c.name ?? c['#text'] ?? ''),
           pid: String(c.type_pid ?? c.pid ?? '0')
         })).filter((c: Category) => c.id && c.name)
+
         const groups: CategoryGroup[] = []
         const rootCats = parsedCats.filter(c => !c.pid || c.pid === '0')
+        
         if (rootCats.length > 0) {
-          rootCats.forEach(root => { groups.push({ id: root.id, name: root.name, children: [{ id: root.id, name: '全部' }] }) })
-          parsedCats.forEach(child => {
-            if (child.pid && child.pid !== '0') {
-              const parent = groups.find(g => g.id === child.pid)
-              if (parent) parent.children.push(child)
-            }
+          // 如果有明确的父子层级，直接按原样映射，绝不捏造“全部”节点
+          rootCats.forEach(root => {
+            groups.push({
+              id: root.id,
+              name: root.name,
+              children: parsedCats.filter(child => child.pid === root.id)
+            })
           })
         } else {
+          // 如果是纯平铺数据（无父子关系），就直接作为一级展示
           groups.push({ id: 'all', name: '全部视频', children: parsedCats })
         }
+
         this.categoryGroups = groups
         if (groups.length > 0) await this.handleGroupChange(groups[0].id)
       } catch (e) {
@@ -249,7 +252,15 @@ export const useTvboxStore = defineStore('tvbox', {
     async handleGroupChange(groupId: string) {
       this.currentGroupId = groupId
       const group = this.categoryGroups.find(g => g.id === groupId)
-      if (group && group.children.length > 0) await this.handleCategoryChange(group.children[0].id)
+      if (group) {
+        if (group.children.length > 0) {
+          // 如果有子分类，默认选中第一个子分类
+          await this.handleCategoryChange(group.children[0].id)
+        } else {
+          // 如果没有子分类，直接请求该一级分类本身的数据
+          await this.handleCategoryChange(group.id)
+        }
+      }
     },
     async handleCategoryChange(categoryId: string) {
       this.currentCategoryId = categoryId
@@ -407,7 +418,6 @@ export const useTvboxStore = defineStore('tvbox', {
       this.playProgressMap = {}
     },
 
-    // ================== 下载相关 ==================
     saveDownloads() { localStorage.setItem('tvbox_downloads', JSON.stringify(this.downloads || [])) },
     addDownload(item: DownloadItem) {
       this.downloads.unshift(item)
@@ -421,9 +431,18 @@ export const useTvboxStore = defineStore('tvbox', {
       this.downloads = []
       localStorage.removeItem('tvbox_downloads')
     },
-
-    // 添加下载任务
     async addToDownloadQueue(video: VideoItem, eps: Episode[]) {
+      if (!(window as any)._downloadProgressBound) {
+        (window as any)._downloadProgressBound = true
+        window.electronAPI.onDownloadProgress((data) => {
+          const task = this.downloadingTasks.find(t => t.id === data.taskId)
+          if (task) {
+            task.progress = data.completed
+            task.total = data.total
+          }
+        })
+      }
+
       for (const ep of eps) {
         if (!ep.url.includes('.m3u8')) continue
         const isDownloaded = this.downloads.some(d => d.videoName === video.name && d.episodeName === ep.name)
@@ -442,22 +461,11 @@ export const useTvboxStore = defineStore('tvbox', {
           epUrl: ep.url
         }
         this.downloadingTasks.unshift(newTask)
-
-        // 无需 await，在后台静默下载
         this.runDownloadTask(newTask)
       }
       ElMessage.success(`已添加 ${eps.length} 个下载任务到后台`)
     },
-
     async runDownloadTask(task: Task) {
-      let startTime = Date.now()
-      window.electronAPI.onDownloadProgress((data) => {
-        if (data.taskId === task.id) {
-          task.progress = data.completed
-          task.total = data.total
-        }
-      })
-
       try {
         const res = await window.electronAPI.downloadEpisode(task.epUrl, task.videoName + '-' + task.episodeName, task.id)
         if (res.ok && res.path) {
@@ -466,11 +474,10 @@ export const useTvboxStore = defineStore('tvbox', {
             id: task.id, videoName: task.videoName, episodeName: task.episodeName,
             pic: task.pic, dirPath: res.path, m3u8Path: `${res.path}/index.m3u8`, createdAt: Date.now()
           })
-          // 完成后移出正在下载队列
           const idx = this.downloadingTasks.findIndex(t => t.id === task.id)
           if (idx >= 0) this.downloadingTasks.splice(idx, 1)
         } else if (res.error === 'CANCELED') {
-          // 已被取消，不做操作
+          // 已取消
         } else {
           task.status = 'canceled'
           ElMessage.error(`下载失败: ${res.error}`)
@@ -479,7 +486,6 @@ export const useTvboxStore = defineStore('tvbox', {
         task.status = 'canceled'
       }
     },
-
     cancelDownloadTask(taskId: string) {
       window.electronAPI.cancelDownload(taskId)
       const idx = this.downloadingTasks.findIndex(t => t.id === taskId)
@@ -489,7 +495,6 @@ export const useTvboxStore = defineStore('tvbox', {
       }
     },
 
-    // ================== 解析接口 ==================
     saveParses() { localStorage.setItem('tvbox_parses', JSON.stringify(this.parses || [])) },
     addParse(name: string, url: string) {
       if (!url) return
