@@ -55,7 +55,7 @@ struct DownloadResult {
     error: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DownloadProgress {
     task_id: String,
@@ -262,16 +262,16 @@ async fn download_episode(
     url: String,
     filename: String,
     task_id: String,
-) -> DownloadResult {
+) -> Result<DownloadResult, String> {
     let token = CancellationToken::new();
     registry.tasks.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(task_id.clone(), token.clone());
     let result = run_download(&app, &url, &filename, &task_id, &token).await;
     registry.tasks.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&task_id);
 
-    match result {
+    Ok(match result {
         Ok(path) => DownloadResult { ok: true, path: path.to_str().map(str::to_owned), error: None },
         Err(error) => DownloadResult { ok: false, path: None, error: Some(error) },
-    }
+    })
 }
 
 async fn run_download(
