@@ -15,8 +15,8 @@ export const cleanM3u8Ads = async (m3u8Url: string): Promise<string> => {
 
   // 1. 拉取并格式化 M3U8
   const fetchM3u8 = async (url: string) => {
-    // 使用 Electron IPC 请求以绕过跨域
-    const res = await window.electronAPI.httpRequest({ url });
+    // 使用原生请求命令绕过跨域
+    const res = await window.desktopAPI.httpRequest({ url });
     if (!res.ok || !res.data) throw new Error('请求 m3u8 失败');
     
     return res.data
@@ -143,6 +143,22 @@ export const cleanM3u8Ads = async (m3u8Url: string): Promise<string> => {
     console.info(`${LOG_TAG} 未检测到广告标签，使用原 m3u8...`);
   }
 
+  const proxiedLines = await Promise.all(m3u8Content.split('\n').map(async line => {
+    const trimmed = line.trim()
+    if (!trimmed) return line
+    if (trimmed.startsWith('#')) {
+      const uriAttributes = [...line.matchAll(/URI="([^"]+)"/g)]
+      let proxiedLine = line
+      for (const match of uriAttributes) {
+        const absoluteUrl = resolveUrl(m3u8Url, match[1])
+        const proxyUrl = await window.desktopAPI.proxyMediaUrl(absoluteUrl)
+        proxiedLine = proxiedLine.replace(match[0], `URI="${proxyUrl}"`)
+      }
+      return proxiedLine
+    }
+    return window.desktopAPI.proxyMediaUrl(resolveUrl(m3u8Url, trimmed))
+  }))
+
   console.info(`${LOG_TAG} 处理耗时: ${Date.now() - startTime}ms`);
-  return m3u8Content;
+  return proxiedLines.join('\n');
 };

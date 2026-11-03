@@ -1,3 +1,4 @@
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { TvboxConfig } from './tvbox'
 
 export interface HttpRequestPayload {
@@ -19,19 +20,18 @@ export type ParseTvboxResult =
 
 declare global {
   interface Window {
-    electronAPI: {
+    desktopAPI: {
       httpRequest: (payload: HttpRequestPayload) => Promise<HttpRequestResult>
       parseTvboxConfig: (rawText: string) => Promise<ParseTvboxResult>
-      
-      // 新增的下载相关接口
       downloadEpisode: (url: string, filename: string, taskId: string) => Promise<{ ok: boolean; path?: string; error?: string }>
-      cancelDownload: (taskId: string) => void
-      onDownloadProgress: (cb: (data: { taskId: string, completed: number, total: number }) => void) => void
-      
-      // 新增的窗口控制接口
-      minimize: () => void
-      maximize: () => void
-      close: () => void
+      cancelDownload: (taskId: string) => Promise<void>
+      onDownloadProgress: (cb: (data: { taskId: string; completed: number; total: number }) => void) => Promise<UnlistenFn>
+      convertFileSrc: (path: string) => string
+      proxyMediaUrl: (url: string) => Promise<string>
+      minimize: () => Promise<void>
+      maximize: () => Promise<void>
+      close: () => Promise<void>
+      toggleDevTools: () => Promise<void>
     }
   }
 }

@@ -3,7 +3,7 @@
     <!-- 顶部标题栏 -->
     <div class="title-bar">
       <div class="logo">TV</div>
-      <div class="drag-region"></div>
+      <div class="drag-region" data-tauri-drag-region></div>
       <div class="window-controls">
         <button class="ctrl-btn" @click="minimize">
           <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 6h10" stroke="currentColor" stroke-width="1.2"/></svg>
@@ -179,6 +179,7 @@ import SettingsDrawer from '@/components/SettingsDrawer.vue'
 import DownloadSelectDialog from '@/components/DownloadSelectDialog.vue'
 import type { VideoItem, HistoryItem, FavoriteItem, DownloadItem, Episode } from '@/types/tvbox'
 import { ElMessageBox, ElMessage } from 'element-plus'
+import { convertFileSrc } from '@tauri-apps/api/core'
 
 const store = useTvboxStore()
 const router = useRouter()
@@ -206,9 +207,9 @@ onMounted(() => {
   }
 })
 
-const minimize = () => window.electronAPI.minimize()
-const maximize = () => window.electronAPI.maximize()
-const close = () => window.electronAPI.close()
+const minimize = () => window.desktopAPI.minimize()
+const maximize = () => window.desktopAPI.maximize()
+const close = () => window.desktopAPI.close()
 
 function handleMenuSelect(index: string) { currentView.value = index as any; isHeaderHidden.value = false }
 
@@ -272,7 +273,7 @@ async function resumePlay(h: HistoryItem) {
 }
 
 function playDownloaded(d: DownloadItem) {
-  const localEp = { name: d.episodeName, url: `file:///${d.m3u8Path.replace(/\\/g, '/')}` }
+  const localEp = { name: d.episodeName, url: convertFileSrc(d.m3u8Path) }
   store.currentVideo = { id: d.id, name: d.videoName, pic: d.pic, remarks: '', year: '', area: '', typeName: '', actor: '', director: '', content: '', playFrom: '', playUrl: '' }
   store.episodes = [localEp]
   store.setPlayEpisode(localEp, 0)

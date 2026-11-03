@@ -4,7 +4,7 @@
       <div class="left-btn" @click="$router.push('/')">
         <el-icon><HomeFilled /></el-icon> 回到主界面
       </div>
-      <div class="center-title">{{ store.currentVideo?.name }}</div>
+      <div class="center-title" data-tauri-drag-region>{{ store.currentVideo?.name }}</div>
       <div class="window-controls">
         <button class="ctrl-btn" @click="minimize">
           <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 6h10" stroke="currentColor" stroke-width="1.2"/></svg>
@@ -130,9 +130,9 @@ const displayEpisodes = computed(() => {
   return store.episodes.filter(ep => ep.from === currentFrom.value)
 })
 
-const minimize = () => window.electronAPI.minimize()
-const maximize = () => window.electronAPI.maximize()
-const close = () => window.electronAPI.close()
+const minimize = () => window.desktopAPI.minimize()
+const maximize = () => window.desktopAPI.maximize()
+const close = () => window.desktopAPI.close()
 
 function handleFromChange() {
   const firstEp = displayEpisodes.value[0]
@@ -237,6 +237,10 @@ async function initPlayer(resumeTime: number = 0) {
     }
   }
 
+  if (!finalPlayUrl.startsWith('blob:') && /^https?:\/\//i.test(finalPlayUrl)) {
+    finalPlayUrl = await window.desktopAPI.proxyMediaUrl(finalPlayUrl)
+  }
+
   const seekToResume = () => {
     if (resumeTime > 0 && videoRef.value) videoRef.value.currentTime = resumeTime
   }
@@ -253,7 +257,7 @@ async function initPlayer(resumeTime: number = 0) {
           if (resumeTime > 0 && videoRef.value && Math.abs(videoRef.value.currentTime - resumeTime) > 2) seekToResume()
         }, 300)
       })
-      hls.on(Hls.Events.ERROR, (event, data) => { if (data.fatal) playError.value = '视频加载失败。' })
+      hls.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) playError.value = '视频加载失败。' })
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = finalPlayUrl
       video.addEventListener('loadedmetadata', () => { seekToResume(); video.play().catch(() => {}) }, { once: true })

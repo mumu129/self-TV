@@ -85,7 +85,7 @@ function parseEpisodes(video: VideoItem): Episode[] {
   return episodes
 }
 async function requestJson(url: string): Promise<Record<string, any>> {
-  const res = await window.electronAPI.httpRequest({ url })
+  const res = await window.desktopAPI.httpRequest({ url })
   if (!res.ok) throw new Error(res.error ?? '网络请求失败')
   if (!res.data) throw new Error('响应为空')
   let responseData = res.data.trim()
@@ -154,12 +154,12 @@ export const useTvboxStore = defineStore('tvbox', {
           config = { sites: [{ key: `custom_${Date.now()}`, name: '自定义接口', type: 1, api: apiUrl }] }
         } else if (trimmed.startsWith('{')) {
           try { config = JSON.parse(trimmed) } catch {
-            const res = await window.electronAPI.parseTvboxConfig(rawText)
+            const res = await window.desktopAPI.parseTvboxConfig(rawText)
             if (!res.ok) throw new Error(res.error)
             config = res.config
           }
         } else {
-          const res = await window.electronAPI.parseTvboxConfig(rawText)
+          const res = await window.desktopAPI.parseTvboxConfig(rawText)
           if (!res.ok) throw new Error(res.error)
           config = res.config
         }
@@ -434,7 +434,7 @@ export const useTvboxStore = defineStore('tvbox', {
     async addToDownloadQueue(video: VideoItem, eps: Episode[]) {
       if (!(window as any)._downloadProgressBound) {
         (window as any)._downloadProgressBound = true
-        window.electronAPI.onDownloadProgress((data) => {
+        void window.desktopAPI.onDownloadProgress((data) => {
           const task = this.downloadingTasks.find(t => t.id === data.taskId)
           if (task) {
             task.progress = data.completed
@@ -467,7 +467,7 @@ export const useTvboxStore = defineStore('tvbox', {
     },
     async runDownloadTask(task: Task) {
       try {
-        const res = await window.electronAPI.downloadEpisode(task.epUrl, task.videoName + '-' + task.episodeName, task.id)
+        const res = await window.desktopAPI.downloadEpisode(task.epUrl, task.videoName + '-' + task.episodeName, task.id)
         if (res.ok && res.path) {
           task.status = 'done'
           this.addDownload({
@@ -487,7 +487,7 @@ export const useTvboxStore = defineStore('tvbox', {
       }
     },
     cancelDownloadTask(taskId: string) {
-      window.electronAPI.cancelDownload(taskId)
+      void window.desktopAPI.cancelDownload(taskId)
       const idx = this.downloadingTasks.findIndex(t => t.id === taskId)
       if (idx >= 0) {
         this.downloadingTasks[idx].status = 'canceled'
