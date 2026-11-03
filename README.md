@@ -6,7 +6,7 @@
 
 ## 🚀 开发与打包
 
-- 环境要求：Node.js 20+、Rust stable，以及 Tauri 所需的系统依赖。
+- 环境要求：Node.js 22+、Rust stable，以及 Tauri 所需的系统依赖。
 - 启动桌面开发版：`npm run tauri:dev`
 - 构建前端：`npm run build`
 - 打包桌面应用：`npm run tauri:build`
