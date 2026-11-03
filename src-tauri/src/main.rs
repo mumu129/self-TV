@@ -125,14 +125,17 @@ fn http_error(error: String) -> HttpRequestResult {
 
 #[tauri::command]
 fn parse_tvbox_config(raw_text: String) -> ParseTvboxResult {
-    match decode_tvbox_json(&raw_text).and_then(|decoded| serde_json::from_str::<Value>(&decoded).map_err(|error| error.to_string())) {
+    match decode_tvbox_json(&raw_text)
+        .and_then(|decoded| strip_json_comments(&decoded))
+        .and_then(|decoded| serde_json::from_str::<Value>(&decoded).map_err(|error| error.to_string()))
+    {
         Ok(config) => ParseTvboxResult { ok: true, config: Some(config), error: None },
         Err(error) => ParseTvboxResult { ok: false, config: None, error: Some(error) },
     }
 }
 
 fn decode_tvbox_json(input: &str) -> Result<String, String> {
-    if serde_json::from_str::<Value>(input).is_ok() {
+    if serde_json::from_str::<Value>(&strip_bom(input)).is_ok() {
         return Ok(input.to_owned());
     }
 
@@ -182,10 +185,67 @@ fn pad_base64(input: &str) -> String {
 }
 
 fn normalize_key(value: &str) -> Vec<u8> {
-    let mut bytes = value.as_bytes().to_vec();
+    let mut bytes = value.trim().as_bytes().to_vec();
     bytes.truncate(16);
     bytes.resize(16, b'0');
     bytes
+}
+
+fn strip_bom(input: &str) -> &str {
+    input.strip_prefix('\u{feff}').unwrap_or(input)
+}
+
+fn strip_json_comments(input: &str) -> Result<String, String> {
+    let content = strip_bom(input);
+    let characters = content.chars().collect::<Vec<_>>();
+    let mut output = String::with_capacity(content.len());
+    let mut in_string = false;
+    let mut escaping = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+    let mut index = 0;
+
+    while index < characters.len() {
+        let current = characters[index];
+        let next = characters.get(index + 1).copied();
+        if in_line_comment {
+            if current == '\n' || current == '\r' {
+                in_line_comment = false;
+                output.push(current);
+            }
+        } else if in_block_comment {
+            if current == '*' && next == Some('/') {
+                in_block_comment = false;
+                index += 1;
+            }
+        } else if in_string {
+            output.push(current);
+            if escaping {
+                escaping = false;
+            } else if current == '\\' {
+                escaping = true;
+            } else if current == '"' {
+                in_string = false;
+            }
+        } else if current == '"' {
+            in_string = true;
+            output.push(current);
+        } else if current == '/' && next == Some('/') {
+            in_line_comment = true;
+            index += 1;
+        } else if current == '/' && next == Some('*') {
+            in_block_comment = true;
+            index += 1;
+        } else {
+            output.push(current);
+        }
+        index += 1;
+    }
+
+    if in_block_comment {
+        return Err("JSON 注释未正确闭合".to_owned());
+    }
+    Ok(output)
 }
 
 #[tauri::command]
@@ -225,7 +285,7 @@ async fn run_download(
     let save_dir = download_root.join("TVBox_Downloads").join(sanitize_filename(filename));
     tokio::fs::create_dir_all(&save_dir).await.map_err(|error| error.to_string())?;
     let result = run_download_inner(app, url, task_id, token, &save_dir).await;
-    if result.as_deref() == Err("CANCELED") {
+    if matches!(&result, Err(error) if error == "CANCELED") {
         let _ = tokio::fs::remove_dir_all(&save_dir).await;
     }
     result.map(|()| save_dir)
@@ -373,7 +433,14 @@ fn remove_ad_blocks(lines: Vec<String>) -> Vec<String> {
             }
         }
     }
-    let main_fps = fps_values[fps_counts.iter().enumerate().max_by_key(|(_, count)| *count).map(|(index, _)| index).unwrap_or(0)];
+    let mut main_fps = 24.0;
+    let mut max_match = 0;
+    for (index, count) in fps_counts.iter().enumerate() {
+        if *count > max_match {
+            max_match = *count;
+            main_fps = fps_values[index];
+        }
+    }
     let mut final_lines = Vec::new();
     let mut current_block = Vec::new();
     let mut is_ad = false;

@@ -10,4 +10,8 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src'), // 添加别名
     },
   },
+  server: {
+    port: 5173,
+    strictPort: true,
+  },
 })

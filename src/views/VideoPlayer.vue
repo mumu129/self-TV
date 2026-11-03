@@ -130,6 +130,8 @@ const displayEpisodes = computed(() => {
   return store.episodes.filter(ep => ep.from === currentFrom.value)
 })
 
+const isLocalVideo = (url: string) => url.startsWith('file://') || url.startsWith('asset://') || url.includes('asset.localhost/')
+
 const minimize = () => window.desktopAPI.minimize()
 const maximize = () => window.desktopAPI.maximize()
 const close = () => window.desktopAPI.close()
@@ -140,7 +142,7 @@ function handleFromChange() {
 }
 
 function playEpisodeByObj(ep: Episode, resume: number = 0) {
-  if (videoRef.value && store.currentVideo && store.currentPlayEpisode && !store.currentPlayEpisode.url.startsWith('file://')) {
+  if (videoRef.value && store.currentVideo && store.currentPlayEpisode && !isLocalVideo(store.currentPlayEpisode.url)) {
     store.updateHistory(store.currentVideo, store.currentPlayEpisode, Math.floor(videoRef.value.currentTime))
   }
   currentEpUrl.value = ep.url
@@ -157,7 +159,7 @@ function playEpisodeByObj(ep: Episode, resume: number = 0) {
 function onTimeUpdate() {
   if (!videoRef.value || !store.currentVideo || !store.currentPlayEpisode) return
   const currentTime = Math.floor(videoRef.value.currentTime)
-  if (store.currentPlayEpisode.url.startsWith('file://')) return
+  if (isLocalVideo(store.currentPlayEpisode.url)) return
   if (currentTime > 0 && currentTime - lastSaveTime >= 5) {
     store.updateHistory(store.currentVideo, store.currentPlayEpisode, currentTime)
     lastSaveTime = currentTime
@@ -167,7 +169,7 @@ function onTimeUpdate() {
 function onSeeked() {
   if (!videoRef.value || !store.currentVideo || !store.currentPlayEpisode) return
   const currentTime = Math.floor(videoRef.value.currentTime)
-  if (!store.currentPlayEpisode.url.startsWith('file://')) {
+  if (!isLocalVideo(store.currentPlayEpisode.url)) {
     store.updateHistory(store.currentVideo, store.currentPlayEpisode, currentTime)
     lastSaveTime = currentTime
   }
@@ -204,7 +206,7 @@ async function initPlayer(resumeTime: number = 0) {
   if (!url) return
   if (url.startsWith('//')) url = 'https:' + url
 
-  if (url.startsWith('file://')) {
+  if (isLocalVideo(url)) {
     video.src = url
     const seekFn = () => { if (resumeTime > 0) video.currentTime = resumeTime; video.play().catch(() => {}) }
     video.addEventListener('loadedmetadata', seekFn, { once: true })
@@ -273,7 +275,7 @@ function forceReload() { playError.value = ''; initPlayer() }
 
 function handleVisibilityChange() {
   if (document.visibilityState === 'hidden' && videoRef.value && store.currentVideo && store.currentPlayEpisode) {
-    if (!store.currentPlayEpisode.url.startsWith('file://')) {
+    if (!isLocalVideo(store.currentPlayEpisode.url)) {
       store.updateHistory(store.currentVideo, store.currentPlayEpisode, Math.floor(videoRef.value.currentTime))
     }
   }
@@ -300,7 +302,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   
   if (videoRef.value && store.currentVideo && store.currentPlayEpisode) {
-    if (!store.currentPlayEpisode.url.startsWith('file://')) {
+    if (!isLocalVideo(store.currentPlayEpisode.url)) {
       store.updateHistory(store.currentVideo, store.currentPlayEpisode, Math.floor(videoRef.value.currentTime))
     }
   }
